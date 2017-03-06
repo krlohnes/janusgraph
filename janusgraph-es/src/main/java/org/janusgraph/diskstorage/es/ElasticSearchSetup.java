@@ -143,6 +143,13 @@ public enum ElasticSearchSetup {
         }
     };
 
+    HTTP {
+      @Override
+      public Connection connect(Configuration config) {
+        return null; //Not applicable to Jest Http Implementation. Doesn't conform to Connection constructor
+      }
+    };
+
     /**
      * Build and setup a new ES settings builder by consulting all JanusGraph config options
      * relevant to TransportClient or Node.  Options may be specific to a single client,
