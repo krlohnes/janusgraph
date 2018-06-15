@@ -134,6 +134,7 @@
         <module>janusgraph-berkeleyje</module>
         <module>janusgraph-cql</module>
         <module>janusgraph-cassandra</module>
+        <module>janusgraph-ignite</module>
         <module>janusgraph-hadoop-parent</module>
         <module>janusgraph-hbase-parent</module>
         <module>janusgraph-bigtable</module>
