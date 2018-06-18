@@ -67,8 +67,7 @@ public class IgniteKeyValueStore implements OrderedKeyValueStore {
             TcpDiscoverySpi discoverySpi = new TcpDiscoverySpi().setLocalAddress(hostAddress);
             discoverySpi.setIpFinder(tcpDCIF);
             igc.setDiscoverySpi(discoverySpi);
-            Ignition.start(igc);
-            Ignite ignite = Ignition.ignite();
+            Ignite ignite = Ignition.getOrStart(igc);
             kvStore = ignite.getOrCreateCache(cfg);
         } catch (java.net.UnknownHostException e) {
             throw new RuntimeException(e);
@@ -120,12 +119,15 @@ public class IgniteKeyValueStore implements OrderedKeyValueStore {
         kvStore.put(key, value);
     }
 
+    //graph = JanusGraphFactory.open('conf/janusgraph-ignite-es.properties')
+
     @Override
     public RecordIterator<KeyValueEntry> getSlice(KVQuery query, StoreTransaction txh)
             throws BackendException {
         final KeySelector selector = query.getKeySelector();
         final SqlQuery<StaticBuffer, StaticBuffer> sqlQuery =
             new SqlQuery<StaticBuffer, StaticBuffer>(StaticBuffer.class, KEY_QUERY);
+        sqlQuery.setArgs(query.getStart(), query.getEnd());
         final List<KeyValueEntry> result = new ArrayList<>();
         try (QueryCursor<Entry<StaticBuffer, StaticBuffer>> cursor = kvStore.query(sqlQuery)) {
             for (Entry<StaticBuffer, StaticBuffer> e : cursor) {

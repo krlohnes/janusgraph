@@ -108,7 +108,7 @@ public class TcpDiscoveryConsulIpFinder extends TcpDiscoveryIpFinderAdapter {
         if (!initGuard.compareAndSet(false, true))
             return;
 
-        String propsAddress = "http://consul";
+        String propsAddress = "http://localdocker";
         String propsPort = String.valueOf(DEFAULT_CONSUL_PORT);
 
         if (log.isInfoEnabled())

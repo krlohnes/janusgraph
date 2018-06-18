@@ -27,8 +27,7 @@ import org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class IgniteStoreManager extends DistributedStoreManager
-        implements OrderedKeyValueStoreManager {
+public class IgniteStoreManager extends DistributedStoreManager implements OrderedKeyValueStoreManager {
 
     private static final Logger log = LoggerFactory.getLogger(IgniteStoreManager.class);
 
@@ -48,6 +47,10 @@ public class IgniteStoreManager extends DistributedStoreManager
             "The isolation level used by transactions",
             ConfigOption.Type.MASKABLE,  String.class,
             TransactionIsolation.REPEATABLE_READ.toString(), disallowEmpty(String.class));
+
+    public IgniteStoreManager(Configuration storageConfig) {
+        this(storageConfig, 9500);
+    }
 
     public IgniteStoreManager(Configuration storageConfig, int portDefault) {
         super(storageConfig, portDefault);

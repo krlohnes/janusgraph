@@ -56,6 +56,11 @@
         </dependency>
         <dependency>
             <groupId>org.janusgraph</groupId>
+            <artifactId>janusgraph-ignite</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.janusgraph</groupId>
             <artifactId>janusgraph-hbase</artifactId>
             <version>${project.version}</version>
         </dependency>
