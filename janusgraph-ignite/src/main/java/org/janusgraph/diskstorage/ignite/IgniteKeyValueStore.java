@@ -27,7 +27,7 @@ import org.apache.ignite.IgniteCache;
 import org.apache.ignite.cache.CacheAtomicityMode;
 import org.apache.ignite.cache.CacheMode;
 import org.apache.ignite.cache.query.QueryCursor;
-import org.apache.ignite.cache.query.SqlQuery;
+import org.apache.ignite.cache.query.ScanQuery;
 import org.apache.ignite.configuration.CacheConfiguration;
 import org.janusgraph.diskstorage.BackendException;
 import org.janusgraph.diskstorage.PermanentBackendException;
@@ -48,7 +48,7 @@ public class IgniteKeyValueStore implements OrderedKeyValueStore {
 
     private IgniteCache<Long, ByteBuffer> kvStore;
     private static final int BSIZE = 1024;
-    private static final String KEY_QUERY = "_key >= ? && _key < ?";
+    private static final String KEY_QUERY = "_key >= ? AND _key < ?";
 
     public IgniteKeyValueStore(Ignite ignite, String name, Configuration config) {
         final CacheConfiguration<Long, ByteBuffer> cfg = new CacheConfiguration<>();
@@ -116,16 +116,22 @@ public class IgniteKeyValueStore implements OrderedKeyValueStore {
     public RecordIterator<KeyValueEntry> getSlice(KVQuery query, StoreTransaction txh)
             throws BackendException {
         final KeySelector selector = query.getKeySelector();
-        SqlQuery<Long, ByteBuffer> sqlQuery = new SqlQuery<>(ByteBuffer.class, KEY_QUERY);
-        Long start = query.getStart().as(StaticBuffer.BB_FACTORY).getLong();
-        Long end = query.getEnd().as(StaticBuffer.BB_FACTORY).getLong();
-        System.err.println("start: " + start);
-        System.err.println("end: " + end);
-        sqlQuery.setArgs(start, end);
-        System.err.println("contains start: " + kvStore.containsKey(start));
+        final Long start = query.getStart().as(StaticBuffer.BB_FACTORY).getLong();
+        Long possibleEnd = query.getEnd().as(StaticBuffer.BB_FACTORY).getLong();
+        if (possibleEnd < 0) {
+            possibleEnd = Long.MAX_VALUE;
+        }
+        final Long end = possibleEnd;
+
+        //SqlQuery<Long, ByteBuffer> sqlQuery = new SqlQuery<>(ByteBuffer.class, KEY_QUERY);
+        //sqlQuery.setArgs(start, end); Keep an eye on
+        //https://issues.apache.org/jira/browse/IGNITE-4191
+        //So this can be done more efficiently and correctly
+        //Right now this doesn't meet JG standards for storage retrieval. It will after 4191
         final List<KeyValueEntry> result = new ArrayList<>();
         int i = 0;
-        try (QueryCursor<Entry<Long, ByteBuffer>> cursor = kvStore.query(sqlQuery)) {
+        ScanQuery<Long, ByteBuffer> sq = new ScanQuery<>((k, p) -> k > start && k <= end);
+        try (QueryCursor<Entry<Long, ByteBuffer>> cursor = kvStore.query(sq)) {
            for (Entry<Long, ByteBuffer> e : cursor) {
                i++;
                ByteBuffer bb = ByteBuffer.allocate(BSIZE);
