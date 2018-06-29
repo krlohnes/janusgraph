@@ -1,32 +1,40 @@
 package org.janusgraph.diskstorage.ignite;
 
-import org.apache.ignite.Ignite;
-import org.apache.ignite.IgniteTransactions;
-import org.apache.ignite.Ignition;
+import org.apache.ignite.lang.IgniteUuid;
 import org.apache.ignite.transactions.Transaction;
 import org.janusgraph.diskstorage.BaseTransactionConfig;
 import org.janusgraph.diskstorage.common.AbstractStoreTransaction;
 
 public class IgniteTx extends AbstractStoreTransaction {
 
-    //TODO This will need to change if non transactional use
-    //is desired
-    private static Ignite ignite = Ignition.ignite();
-    private static IgniteTransactions transactions = ignite.transactions();
-    private Transaction tx;
-    public IgniteTx(BaseTransactionConfig config) {
+    private volatile Transaction tx;
+    public IgniteTx(Transaction t, BaseTransactionConfig config) {
         super(config);
-        tx = transactions.txStart();
+        tx = t;
     }
 
     @Override
-    public void commit() {
-        tx.commit();
+    public synchronized void commit() {
+        if (tx == null) {
+            return;
+        } else {
+            System.err.println("Committing tx " + tx.xid());
+            tx.commit();
+        }
     }
 
     @Override
-    public void rollback() {
-        tx.rollback();
+    public synchronized void rollback() {
+        if (tx == null) {
+            return;
+        } else {
+            System.err.println("Rolling back tx " + tx.xid());
+            tx.rollback();
+        }
+    }
+
+    public IgniteUuid getId() {
+        return tx.xid();
     }
 
 }

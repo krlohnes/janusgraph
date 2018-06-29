@@ -3,10 +3,18 @@ package org.janusgraph.diskstorage.ignite;
 import static org.janusgraph.diskstorage.configuration.ConfigOption.disallowEmpty;
 import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.GRAPH_NAME;
 
+import java.net.InetAddress;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.ignite.Ignite;
+import org.apache.ignite.Ignition;
+import org.apache.ignite.configuration.DataStorageConfiguration;
+import org.apache.ignite.configuration.IgniteConfiguration;
+import org.apache.ignite.configuration.WALMode;
+import org.apache.ignite.spi.discovery.tcp.TcpDiscoverySpi;
+import org.apache.ignite.transactions.Transaction;
 import org.apache.ignite.transactions.TransactionIsolation;
 import org.janusgraph.diskstorage.BackendException;
 import org.janusgraph.diskstorage.BaseTransactionConfig;
@@ -35,7 +43,10 @@ public class IgniteStoreManager extends DistributedStoreManager implements Order
     private final StoreFeatures features;
     private final Configuration config;
 
+    private Ignite ignite;
+
     private Deployment deployment;
+    private TcpDiscoveryConsulIpFinder tcpDCIF = new TcpDiscoveryConsulIpFinder();
 
     public static final ConfigNamespace IGNITE_NS =
             new ConfigNamespace(GraphDatabaseConfiguration.STORAGE_NS,
@@ -56,6 +67,25 @@ public class IgniteStoreManager extends DistributedStoreManager implements Order
         super(storageConfig, portDefault);
         stores = new HashMap<>();
         this.config = storageConfig;
+        final String hostAddress;
+        synchronized (IgniteStoreManager.class) {
+            //DataStorageConfiguration storageCfg = new DataStorageConfiguration();
+            //storageCfg.getDefaultDataRegionConfiguration().setPersistenceEnabled(true);
+            //storageCfg.setWalMode(WALMode.FSYNC);
+            //storageCfg.setStoragePath("/tmp/ignite0");//TODO Add this to configuration
+            final IgniteConfiguration igc = new IgniteConfiguration();
+            //igc.setDataStorageConfiguration(storageCfg);
+            try {
+                hostAddress = InetAddress.getLocalHost().getHostAddress();
+                TcpDiscoverySpi discoverySpi = new TcpDiscoverySpi().setLocalAddress(hostAddress);
+                discoverySpi.setIpFinder(tcpDCIF);
+                igc.setDiscoverySpi(discoverySpi);
+                Ignition.getOrStart(igc);
+                ignite = Ignition.ignite();
+            } catch (java.net.UnknownHostException e) {
+                throw new RuntimeException(e);
+            }
+        }
 
         features = new StandardStoreFeatures.Builder()
                     .orderedScan(true)
@@ -64,29 +94,26 @@ public class IgniteStoreManager extends DistributedStoreManager implements Order
                     .locking(true)
                     .keyOrdered(true)
                     .scanTxConfig(GraphDatabaseConfiguration.buildGraphConfiguration()
-                            .set(ISOLATION_LEVEL, TransactionIsolation.REPEATABLE_READ.toString()))
+                    .set(ISOLATION_LEVEL, TransactionIsolation.REPEATABLE_READ.toString()))
                     .supportsInterruption(false)
                     .optimisticLocking(false)
                     .build();
-          this.deployment = Deployment.LOCAL;
-//        features = new StoreFeatures();
-//        features.supportsOrderedScan = true;
-//        features.supportsUnorderedScan = false; This _could_ be true
-//        features.supportsBatchMutation = false;
-//        features.supportsTxIsolation = transactional;
-//        features.supportsConsistentKeyOperations = true;
-//        features.supportsLocking = true;
-//        features.isKeyOrdered = true;
-//        features.isDistributed = true;
-//        features.hasLocalKeyPartition = false;
-//          Not sure yet about this. I think false is correct.
-//        features.supportsMultiQuery = false;
-        // TODO Auto-generated constructor stub
+        this.deployment = Deployment.LOCAL;
     }
 
     @Override
     public StoreTransaction beginTransaction(BaseTransactionConfig config) throws BackendException {
-        return new IgniteTx(config);
+        Transaction tx = null;
+        synchronized (this) {
+            if (ignite.transactions().tx() == null) {
+                tx = ignite.transactions().txStart();
+                System.err.println("Starting tx " + tx.xid());
+            } else {
+                System.err.println("Tx found");
+                tx = ignite.transactions().tx();
+            }
+        }
+        return new IgniteTx(tx, config);
     }
 
     @Override
@@ -133,7 +160,7 @@ public class IgniteStoreManager extends DistributedStoreManager implements Order
         if (stores.containsKey(name)) {
             return stores.get(name);
         }
-        IgniteKeyValueStore store = new IgniteKeyValueStore(name, config);
+        IgniteKeyValueStore store = new IgniteKeyValueStore(ignite, name, config);
         stores.put(name, store);
         return store;
     }

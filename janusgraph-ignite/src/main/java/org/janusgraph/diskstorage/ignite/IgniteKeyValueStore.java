@@ -14,7 +14,7 @@
 
 package org.janusgraph.diskstorage.ignite;
 
-import java.net.InetAddress;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -24,14 +24,11 @@ import javax.cache.Cache.Entry;
 
 import org.apache.ignite.Ignite;
 import org.apache.ignite.IgniteCache;
-import org.apache.ignite.Ignition;
 import org.apache.ignite.cache.CacheAtomicityMode;
 import org.apache.ignite.cache.CacheMode;
 import org.apache.ignite.cache.query.QueryCursor;
 import org.apache.ignite.cache.query.SqlQuery;
 import org.apache.ignite.configuration.CacheConfiguration;
-import org.apache.ignite.configuration.IgniteConfiguration;
-import org.apache.ignite.spi.discovery.tcp.TcpDiscoverySpi;
 import org.janusgraph.diskstorage.BackendException;
 import org.janusgraph.diskstorage.PermanentBackendException;
 import org.janusgraph.diskstorage.StaticBuffer;
@@ -42,51 +39,44 @@ import org.janusgraph.diskstorage.keycolumnvalue.keyvalue.KeySelector;
 import org.janusgraph.diskstorage.keycolumnvalue.keyvalue.KeyValueEntry;
 import org.janusgraph.diskstorage.keycolumnvalue.keyvalue.OrderedKeyValueStore;
 import org.janusgraph.diskstorage.util.RecordIterator;
+import org.janusgraph.diskstorage.util.StaticArrayBuffer;
 
 /**
  * Essentially a wrapper for operations on the IgniteCache
  */
 public class IgniteKeyValueStore implements OrderedKeyValueStore {
 
-    private IgniteCache<StaticBuffer, StaticBuffer> kvStore;
-    private TcpDiscoveryConsulIpFinder tcpDCIF = new TcpDiscoveryConsulIpFinder();
-    private static final String KEY_QUERY = "_key >= ? AND _key <= ? ORDER BY _key ASC";
+    private IgniteCache<Long, ByteBuffer> kvStore;
+    private static final int BSIZE = 1024;
+    private static final String KEY_QUERY = "_key >= ? && _key < ?";
 
-    public IgniteKeyValueStore(String name, Configuration config) {
-        //TODO configure number of replicas via configuration
-        //TODO configure durable storage
-        final IgniteConfiguration igc = new IgniteConfiguration();
-        final CacheConfiguration<StaticBuffer, StaticBuffer> cfg = new CacheConfiguration<>();
+    public IgniteKeyValueStore(Ignite ignite, String name, Configuration config) {
+        final CacheConfiguration<Long, ByteBuffer> cfg = new CacheConfiguration<>();
         cfg.setCacheMode(CacheMode.PARTITIONED);
         cfg.setName(name);
         cfg.setAtomicityMode(CacheAtomicityMode.TRANSACTIONAL);
-        cfg.setIndexedTypes(StaticBuffer.class, StaticBuffer.class);
-        String hostAddress;
-        try {
-            hostAddress = InetAddress.getLocalHost().getHostAddress();
-            TcpDiscoverySpi discoverySpi = new TcpDiscoverySpi().setLocalAddress(hostAddress);
-            discoverySpi.setIpFinder(tcpDCIF);
-            igc.setDiscoverySpi(discoverySpi);
-            Ignite ignite = Ignition.getOrStart(igc);
-            kvStore = ignite.getOrCreateCache(cfg);
-        } catch (java.net.UnknownHostException e) {
-            throw new RuntimeException(e);
-        }
+        cfg.setIndexedTypes(Long.class, ByteBuffer.class);
+        kvStore = ignite.getOrCreateCache(cfg);
     }
 
     @Override
     public void delete(StaticBuffer key, StoreTransaction txh) throws BackendException {
-        kvStore.remove(key);
+        kvStore.remove(key.as(StaticBuffer.BB_FACTORY).getLong());
     }
 
     @Override
     public StaticBuffer get(StaticBuffer key, StoreTransaction txh) throws BackendException {
-        return kvStore.get(key);
+        ByteBuffer value = kvStore.get(key.as(StaticBuffer.BB_FACTORY).getLong());
+        if (value == null) {
+            return null;
+        } else {
+            return StaticArrayBuffer.of(value);
+        }
     }
 
     @Override
     public boolean containsKey(StaticBuffer key, StoreTransaction txh) throws BackendException {
-        return kvStore.containsKey(key);
+        return kvStore.containsKey(key.as(StaticBuffer.BB_FACTORY).getLong());
     }
 
     public void clear() {
@@ -109,14 +99,15 @@ public class IgniteKeyValueStore implements OrderedKeyValueStore {
         if (kvStore.isClosed()) {
             throw new PermanentBackendException("Store already closed");
         } else {
-            kvStore.close();
+            //kvStore.close();
         }
     }
 
     @Override
     public void insert(StaticBuffer key, StaticBuffer value, StoreTransaction txh)
             throws BackendException {
-        kvStore.put(key, value);
+        System.err.println(key.as(StaticBuffer.BB_FACTORY).getLong());
+        kvStore.put(key.as(StaticBuffer.BB_FACTORY).getLong(), value.as(StaticBuffer.BB_FACTORY));
     }
 
     //graph = JanusGraphFactory.open('conf/janusgraph-ignite-es.properties')
@@ -125,17 +116,27 @@ public class IgniteKeyValueStore implements OrderedKeyValueStore {
     public RecordIterator<KeyValueEntry> getSlice(KVQuery query, StoreTransaction txh)
             throws BackendException {
         final KeySelector selector = query.getKeySelector();
-        final SqlQuery<StaticBuffer, StaticBuffer> sqlQuery =
-            new SqlQuery<StaticBuffer, StaticBuffer>(StaticBuffer.class, KEY_QUERY);
-        sqlQuery.setArgs(query.getStart(), query.getEnd());
+        SqlQuery<Long, ByteBuffer> sqlQuery = new SqlQuery<>(ByteBuffer.class, KEY_QUERY);
+        Long start = query.getStart().as(StaticBuffer.BB_FACTORY).getLong();
+        Long end = query.getEnd().as(StaticBuffer.BB_FACTORY).getLong();
+        System.err.println("start: " + start);
+        System.err.println("end: " + end);
+        sqlQuery.setArgs(start, end);
+        System.err.println("contains start: " + kvStore.containsKey(start));
         final List<KeyValueEntry> result = new ArrayList<>();
-        try (QueryCursor<Entry<StaticBuffer, StaticBuffer>> cursor = kvStore.query(sqlQuery)) {
-            for (Entry<StaticBuffer, StaticBuffer> e : cursor) {
-               if (selector.include(e.getKey())) {
-                    result.add(new KeyValueEntry(e.getKey(), e.getValue()));
+        int i = 0;
+        try (QueryCursor<Entry<Long, ByteBuffer>> cursor = kvStore.query(sqlQuery)) {
+           for (Entry<Long, ByteBuffer> e : cursor) {
+               i++;
+               ByteBuffer bb = ByteBuffer.allocate(BSIZE);
+               bb.asLongBuffer().put(e.getKey());
+               if (selector.include(StaticArrayBuffer.of(bb))) {
+                    result.add(new KeyValueEntry(StaticArrayBuffer.of(bb),
+                               StaticArrayBuffer.of(e.getValue())));
                }
                if (selector.reachedLimit()) break;
             }
+            System.err.println("found: " + i);
         }
         return recordIteratorFromList(result);
     }
