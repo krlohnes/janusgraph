@@ -15,7 +15,8 @@
 package org.janusgraph.graphdb.database.management;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Sets;
+
 import org.janusgraph.core.JanusGraphTransaction;
 import org.janusgraph.core.schema.JanusGraphManagement;
 import org.janusgraph.diskstorage.ResourceUnavailableException;
@@ -77,6 +78,16 @@ public class ManagementLogger implements MessageReader {
         Preconditions.checkNotNull(times);
     }
 
+    public Set<String> getAckedInstances(Long evictionId) {
+        EvictionTrigger et = evictionTriggerMap.get(evictionId);
+        return Sets.symmetricDifference(et.instancesAtEvictionTime, et.instancesToBeAcknowledged);
+    }
+
+    public Set<String> getUnackedInstances(Long evictionId) {
+        EvictionTrigger et = evictionTriggerMap.get(evictionId);
+        return et.instancesToBeAcknowledged;
+    }
+
     @Override
     public void read(Message message) {
         ReadBuffer in = message.getContent().asReadBuffer();
@@ -119,6 +130,10 @@ public class ManagementLogger implements MessageReader {
 
     }
 
+    public long getCurrentEvictionId() {
+        return evictionTriggerCounter.get();
+    }
+
     public void sendCacheEviction(Set<JanusGraphSchemaVertex> updatedTypes,
                                              final boolean evictGraphFromCache,
                                              List<Callable<Boolean>> updatedTypeTriggers,
@@ -157,6 +172,7 @@ public class ManagementLogger implements MessageReader {
         final long evictionId;
         final List<Callable<Boolean>> updatedTypeTriggers;
         final StandardJanusGraph graph;
+        final Set<String> instancesAtEvictionTime;
         final Set<String> instancesToBeAcknowledged;
 
         private EvictionTrigger(long evictionId, List<Callable<Boolean>> updatedTypeTriggers, StandardJanusGraph graph) {
@@ -165,7 +181,9 @@ public class ManagementLogger implements MessageReader {
             this.updatedTypeTriggers = updatedTypeTriggers;
             final JanusGraphManagement mgmt = graph.openManagement();
             this.instancesToBeAcknowledged = ConcurrentHashMap.newKeySet();
+            this.instancesAtEvictionTime = ConcurrentHashMap.newKeySet();
             ((ManagementSystem) mgmt).getOpenInstancesInternal().forEach(instancesToBeAcknowledged::add);
+            instancesToBeAcknowledged.forEach(instancesAtEvictionTime::add);
             mgmt.rollback();
         }
 

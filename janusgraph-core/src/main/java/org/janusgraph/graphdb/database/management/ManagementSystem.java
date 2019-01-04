@@ -134,7 +134,6 @@ public class ManagementSystem implements JanusGraphManagement {
     private final StandardJanusGraph graph;
     private final Log sysLog;
     private final ManagementLogger managementLogger;
-
     private final TransactionalConfiguration transactionalConfig;
     private final ModifiableConfiguration modifyConfig;
     private final UserModifiableConfiguration userConfig;
@@ -199,6 +198,10 @@ public class ManagementSystem implements JanusGraphManagement {
         return openInstances;
     }
 
+    public long getCurrentEvictionId() {
+        return managementLogger.getCurrentEvictionId();
+    }
+
     @Override
     public Set<String> getOpenInstances() {
         Set<String> openInstances = getOpenInstancesInternal();
@@ -257,6 +260,14 @@ public class ManagementSystem implements JanusGraphManagement {
         transactionalConfig.rollback();
         transaction.rollback();
         close();
+    }
+
+    public Set<String> getAckedInstances(Long evictionTriggerId) {
+        return managementLogger.getAckedInstances(evictionTriggerId);
+    }
+
+    public Set<String> getUnackedInstances(Long evictionTriggerId) {
+        return managementLogger.getUnackedInstances(evictionTriggerId);
     }
 
     @Override
